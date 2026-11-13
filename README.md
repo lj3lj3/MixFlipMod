@@ -4,6 +4,35 @@
 
 支持 HyperOS 3.0 及以上版本，需要配合支持 libxposed API 101 的 Xposed 框架使用
 
+应用包名为 `vip.chener.mixflipmod`。与原包名版本属于不同应用，安装后需要在 LSPosed 中重新启用并设置作用域，原版本的设置不会自动迁移；请避免同时启用两个版本。
+
+## 构建与性能验证
+
+使用 JDK 17 和 Android SDK 37 构建。在 Windows 上执行：
+
+```powershell
+.\gradlew.bat :app:assembleDebug
+.\gradlew.bat :app:assembleUnminified
+.\gradlew.bat :app:assembleRelease
+```
+
+`debug` 为可调试版本，未启用 R8；`unminified` 为不可调试且未启用 R8 的性能验证版本，使用调试签名；`release` 保持启用 R8。产物分别位于 `app/build/outputs/apk/` 下的同名目录。比较 R8 对流畅度的影响时，应使用 `unminified` 与 `release`，避免混入 Compose 调试开销。
+
+主界面的应用信息在后台加载并复用，列表入口独立懒加载，图标使用有容量上限的内存缓存。仅保留实际使用的三个 Material 扩展图标源码，避免未启用 R8 时打包完整扩展图标库。
+
+## 自动构建与发布
+
+`.github/workflows/release.yml` 沿用 MusicEnhance 的发布规则：推送到 `main`、推送 `v*` 标签或手动运行 Actions 时，根据 `app/build.gradle.kts` 的版本构建并上传 GitHub Release。标签须匹配应用版本，例如 `3.1.0` 对应 `v3.1.0`。
+
+- 数字版本发布为正式 Release；带 `-beta` 后缀的版本发布为 Pre-release。
+- 从上一个同类型 Release 汇总提交，生成更新日志。
+- 上传原始命名的 Release APK 和 `.apk.sha256` 文件，Actions 产物保留 14 天。
+- 已公开的版本不覆盖；发布新版本需同时递增 `versionName` 和 `versionCode`。上传失败保留草稿，允许重试。
+
+Actions Secrets 继续使用 `KEY_STORE`（JKS 文件的 Base64）、`KEY_STORE_PASSWORD` 和 `ALIAS`；可选的 `KEY_PASSWORD` 未设置时使用密钥库密码。自动发布必须配置签名，不会回退到调试签名；发布使用当前仓库的 `GITHUB_TOKEN`。
+
+检查发布规则：`python -B -m unittest discover -s .github/scripts/tests -v`。构建前可执行 `./gradlew --no-configuration-cache :app:writeReleaseMetadata :app:lintRelease :app:assembleRelease`（Windows 使用 `gradlew.bat`）。
+
 ## 功能
 
 隐藏外屏状态：
@@ -61,6 +90,7 @@
 
 - [KernelSU](https://github.com/tiann/KernelSU)
 - [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler)
+- [AndroidX Compose Material Icons](https://android.googlesource.com/platform/frameworks/support/+/androidx-main/compose/material/material-icons-extended/)：三个本地图标保留原始 Apache-2.0 许可证声明。
 
 ## 许可
 
