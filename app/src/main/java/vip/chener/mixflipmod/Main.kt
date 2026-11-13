@@ -1,6 +1,7 @@
 package vip.chener.mixflipmod
 
 import vip.chener.mixflipmod.hook.FlipHomeHook
+import vip.chener.mixflipmod.hook.GboardHook
 import vip.chener.mixflipmod.hook.HideOuterHook
 import vip.chener.mixflipmod.hook.PersonalAssistantHook
 import vip.chener.mixflipmod.hook.SogouHook
@@ -33,6 +34,7 @@ class Main : XposedModule() {
 
     override fun onPackageReady(param: PackageReadyParam) {
         if (!param.isFirstPackage) return
+        if (param.packageName == GboardHook.PACKAGE) GboardHook.hook(param)
         hooks.filter { param.packageName in it.targetPackages }.forEach { it.hook(param) }
     }
 }

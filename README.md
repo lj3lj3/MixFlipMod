@@ -45,6 +45,7 @@ Actions Secrets 继续使用 `KEY_STORE`（JKS 文件的 Base64）、`KEY_STORE_
 - 所有应用合盖继续使用
 - 自定义外屏输入法（设置为 Gboard 后，可使用 Magisk 或 KernelSU + mountify 刷入 MixFlipGboard 模块启用外屏优化适配）
 - 自定义外屏应用渲染模式（全屏/不缩放/自定义缩放比例）
+- 修复外屏键盘弹出时画面上移（默认关闭，适用于默认/缩放兼容模式；更新模块后重启手机，开启后重新打开目标应用）
 
 > 系统应用推荐缩放比例：
 >
@@ -79,6 +80,10 @@ Actions Secrets 继续使用 `KEY_STORE`（JKS 文件的 Base64）、`KEY_STORE_
 
 - 恢复外屏工具栏
 - 恢复外屏剪贴板候选词
+
+Gboard：
+
+- 外屏摄像头避让（默认关闭，摄像头左上时全宽显示，右下时侧边避让；无需替换 Gboard，展开内屏后恢复原布局）
 
 ## 权限说明
 

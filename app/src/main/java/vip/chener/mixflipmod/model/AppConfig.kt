@@ -114,6 +114,7 @@ private val systemFrameworkConfig = AppConfig(
     prefs = listOf(
         PrefSpec.Switch(Prefs.SYSTEM_COMPAT_CONFIG, R.string.pref_system_compat_config),
         PrefSpec.Switch(Prefs.SYSTEM_FLIP_CONTINUITY, R.string.pref_system_flip_continuity, R.string.pref_system_flip_continuity_summary),
+        PrefSpec.Switch(Prefs.SYSTEM_FLIP_IME_INSETS_FIX, R.string.pref_system_flip_ime_insets_fix, R.string.pref_system_flip_ime_insets_fix_summary),
         PrefSpec.OptionSelect(
             Prefs.SYSTEM_FLIP_IME_PKG,
             R.string.pref_system_flip_ime_pkg,
@@ -182,6 +183,13 @@ private val sogouConfig = AppConfig(
     ),
 )
 
+private val gboardConfig = AppConfig(
+    packageName = "com.google.android.inputmethod.latin",
+    prefs = listOf(
+        PrefSpec.Switch(Prefs.SYSTEM_GBOARD_CUTOUT_FIX, R.string.pref_system_gboard_cutout_fix, R.string.pref_system_gboard_cutout_fix_summary),
+    ),
+)
+
 internal val configNodes = listOf(
     ConfigNode.Group(
         id = "hide_outer",
@@ -194,6 +202,7 @@ internal val configNodes = listOf(
     ConfigNode.Package(flipHomeConfig),
     ConfigNode.Package(personalAssistantConfig),
     ConfigNode.Package(sogouConfig),
+    ConfigNode.Package(gboardConfig),
 )
 
 internal val appConfigs = configNodes.flatMap { it.packages }
