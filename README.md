@@ -4,7 +4,7 @@
 
 支持 HyperOS 3.0 及以上版本，需要配合支持 libxposed API 101 的 Xposed 框架使用
 
-应用包名为 `vip.chener.mixflipmod`。与原包名版本属于不同应用，安装后需要在 LSPosed 中重新启用并设置作用域，原版本的设置不会自动迁移；请避免同时启用两个版本。
+应用包名为 `com.parallelc.mixflipmod`。与原包名版本属于不同应用，安装后需要在 LSPosed 中重新启用并设置作用域，原版本的设置不会自动迁移；请避免同时启用两个版本。
 
 ## 构建与性能验证
 

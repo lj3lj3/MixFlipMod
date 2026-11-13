@@ -50,7 +50,7 @@ class PipelineTests(unittest.TestCase):
         filename = "MixFlipMod_3.1.0_30100.apk"
         source = directory / filename
         source.write_bytes(b"test-only APK")
-        output = {"applicationId": "vip.chener.mixflipmod", "elements": [{
+        output = {"applicationId": "com.parallelc.mixflipmod", "elements": [{
             "outputFile": filename, "versionName": "3.1.0", "versionCode": 30100,
         }]}
         return directory, source, output

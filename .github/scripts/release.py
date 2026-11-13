@@ -22,7 +22,7 @@ NOTES = WORK / "notes.md"
 DIST = WORK / "dist"
 VERSION = re.compile(r"^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))?(?:-beta(?:\.?\d+)?)?$", re.I)
 MAX_NOTES_BYTES = 100_000
-APPLICATION_ID = "vip.chener.mixflipmod"
+APPLICATION_ID = "com.parallelc.mixflipmod"
 
 
 def classify_version(version):

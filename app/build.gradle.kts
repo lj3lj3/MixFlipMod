@@ -16,11 +16,11 @@ apksign {
 
 
 android {
-    namespace = "vip.chener.mixflipmod"
+    namespace = "com.parallelc.mixflipmod"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "vip.chener.mixflipmod"
+        applicationId = "com.parallelc.mixflipmod"
         minSdk = 35
         targetSdk = 36
         versionCode = 30300
