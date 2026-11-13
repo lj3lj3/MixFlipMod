@@ -1,6 +1,7 @@
 package com.parallelc.mixflipmod.hook
 
 import android.content.ComponentName
+import android.graphics.Color
 import android.graphics.Rect
 import android.content.Context
 import android.content.SharedPreferences
@@ -17,6 +18,7 @@ import com.parallelc.mixflipmod.Prefs.FlipScreenMode
 import com.parallelc.mixflipmod.hook.util.after
 import com.parallelc.mixflipmod.hook.util.callMethod
 import com.parallelc.mixflipmod.hook.util.createDexKitBridge
+import com.parallelc.mixflipmod.hook.util.logInfo
 import com.parallelc.mixflipmod.hook.util.findClass
 import com.parallelc.mixflipmod.hook.util.getField
 import com.parallelc.mixflipmod.hook.util.hook
@@ -36,6 +38,7 @@ object SystemHook {
         safeHook("[android] ${Prefs.SYSTEM_FLIP_CONTINUITY}") { hookFlipContinuity(param) }
         safeHook("[android] ${Prefs.SYSTEM_FLIP_IME_PKG}") { hookFlipInputMethod(param) }
         safeHook("[android] ${Prefs.SYSTEM_FLIP_SCREEN_MODE}") { hookFlipScreenMode(param) }
+        safeHook("[android] ${Prefs.SYSTEM_FLIP_LETTERBOX_BLACK}") { hookFlipLetterboxColor(param) }
         safeHook("[android] ${Prefs.SYSTEM_FLIP_IME_INSETS_FIX}") { hookFlipImeInsetsFix(param) }
         safeHook("[android] ${Prefs.SYSTEM_GBOARD_CUTOUT_FIX}") {
             GboardWindowHook.hook(param) { systemGboardCutoutFixEnabled }
@@ -57,6 +60,7 @@ object SystemHook {
     private fun refreshSystemPrefsCache(prefs: SharedPreferences) {
         systemCompatConfigEnabled = prefs.getBoolean(Prefs.SYSTEM_COMPAT_CONFIG, false)
         systemFlipContinuityEnabled = prefs.getBoolean(Prefs.SYSTEM_FLIP_CONTINUITY, false)
+        flipLetterboxBlackEnabled = prefs.getBoolean(Prefs.SYSTEM_FLIP_LETTERBOX_BLACK, false)
         systemFlipImeInsetsFixEnabled = prefs.getBoolean(Prefs.SYSTEM_FLIP_IME_INSETS_FIX, false)
         systemGboardCutoutFixEnabled = prefs.getBoolean(Prefs.SYSTEM_GBOARD_CUTOUT_FIX, false)
         flipInputMethodPackageCache = normalizeFlipInputMethodPackage(
@@ -83,6 +87,9 @@ object SystemHook {
             }
             key == Prefs.SYSTEM_FLIP_CONTINUITY -> {
                 systemFlipContinuityEnabled = prefs.getBoolean(key, false)
+            }
+            key == Prefs.SYSTEM_FLIP_LETTERBOX_BLACK -> {
+                flipLetterboxBlackEnabled = prefs.getBoolean(key, false)
             }
             key == Prefs.SYSTEM_FLIP_IME_INSETS_FIX -> {
                 systemFlipImeInsetsFixEnabled = prefs.getBoolean(key, false)
@@ -303,6 +310,19 @@ object SystemHook {
         }
     }
 
+    private fun hookFlipLetterboxColor(param: SystemServerStartingParam) {
+        val overrides = param.classLoader.findClass("com.android.server.wm.AppCompatLetterboxOverrides")
+        hook(overrides.method("getLetterboxBackgroundColor")) { chain ->
+            if (!flipLetterboxBlackEnabled || !isFlipFolded()) return@hook chain.proceed()
+            val letterbox = chain.thisObject?.getField("mLetterbox") ?: return@hook chain.proceed()
+            val smallLetterbox = runCatching { letterbox.callMethod("isFlipSmallLetterBox") as? Boolean }
+                .getOrNull() == true
+            if (!smallLetterbox) return@hook chain.proceed()
+            Color.valueOf(Color.BLACK)
+        }
+        logInfo("[android] ${Prefs.SYSTEM_FLIP_LETTERBOX_BLACK} hook installed")
+    }
+
     private fun ActivityInfo.applyFlipScreenMode() {
         val mode = flipScreenModeFor(packageName)
         if (mode == FlipScreenMode.DEFAULT) return
@@ -506,6 +526,8 @@ object SystemHook {
     private var systemCompatConfigEnabled = false
     @Volatile
     private var systemFlipContinuityEnabled = false
+    @Volatile
+    private var flipLetterboxBlackEnabled = false
     @Volatile
     private var systemFlipImeInsetsFixEnabled = false
     @Volatile

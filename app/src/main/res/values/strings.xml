@@ -30,6 +30,8 @@
     <string name="pref_system_flip_continuity">合盖继续使用</string>
     <string name="pref_system_flip_continuity_summary">覆盖系统设置，所有应用合盖继续使用</string>
     <string name="pref_system_flip_ime_pkg">外屏输入法</string>
+    <string name="pref_system_flip_letterbox_black">外屏摄像头区域黑色背景</string>
+    <string name="pref_system_flip_letterbox_black_summary">将未适配应用外屏留白区域改为黑色</string>
     <string name="pref_system_flip_ime_insets_fix">修复外屏键盘弹出时画面上移</string>
     <string name="pref_system_gboard_cutout_fix">外屏摄像头避让</string>
     <string name="pref_system_gboard_cutout_fix_summary">摄像头左上时在其下方全宽显示，右下时侧边避让。需同时勾选系统框架和 Gboard 作用域，更新后重新加载系统框架</string>

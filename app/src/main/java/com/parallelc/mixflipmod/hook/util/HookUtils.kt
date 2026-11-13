@@ -19,6 +19,10 @@ internal fun log(msg: String, e: Throwable? = null) {
     module?.log(Log.ERROR, LOG_TAG, msg, e)
 }
 
+internal fun logInfo(msg: String) {
+    module?.log(Log.INFO, LOG_TAG, msg, null)
+}
+
 internal fun hook(origin: Executable, hooker: Hooker): HookHandle = module!!.hook(origin).intercept(hooker)
 
 internal fun hook(origin: Executable, priority: Int, hooker: Hooker): HookHandle = module!!.hook(origin).setPriority(priority).intercept(hooker)
