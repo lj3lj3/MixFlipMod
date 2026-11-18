@@ -115,6 +115,11 @@ private val systemFrameworkConfig = AppConfig(
         PrefSpec.Switch(Prefs.SYSTEM_COMPAT_CONFIG, R.string.pref_system_compat_config),
         PrefSpec.Switch(Prefs.SYSTEM_FLIP_CONTINUITY, R.string.pref_system_flip_continuity, R.string.pref_system_flip_continuity_summary),
         PrefSpec.Switch(
+            Prefs.SYSTEM_FLIP_HIDE_STATUS_BAR,
+            R.string.pref_system_flip_hide_status_bar,
+            R.string.pref_system_flip_hide_status_bar_summary,
+        ),
+        PrefSpec.Switch(
             Prefs.SYSTEM_FLIP_LETTERBOX_BLACK,
             R.string.pref_system_flip_letterbox_black,
             R.string.pref_system_flip_letterbox_black_summary,

@@ -9,7 +9,9 @@ import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
+import android.view.Display
 import android.view.WindowManager
 import android.view.DisplayCutout
 import android.view.WindowInsets
@@ -26,6 +28,7 @@ import com.parallelc.mixflipmod.hook.util.log
 import com.parallelc.mixflipmod.hook.util.method
 import com.parallelc.mixflipmod.hook.util.runWithCleanup
 import com.parallelc.mixflipmod.hook.util.safeHook
+import com.parallelc.mixflipmod.hook.util.setField
 import com.parallelc.mixflipmod.module
 import io.github.libxposed.api.XposedInterface.Hooker
 import io.github.libxposed.api.XposedModuleInterface.SystemServerStartingParam
@@ -38,6 +41,7 @@ object SystemHook {
         safeHook("[android] ${Prefs.SYSTEM_FLIP_CONTINUITY}") { hookFlipContinuity(param) }
         safeHook("[android] ${Prefs.SYSTEM_FLIP_IME_PKG}") { hookFlipInputMethod(param) }
         safeHook("[android] ${Prefs.SYSTEM_FLIP_SCREEN_MODE}") { hookFlipScreenMode(param) }
+        safeHook("[android] ${Prefs.SYSTEM_FLIP_HIDE_STATUS_BAR}") { hookHideStatusBarOnFlip(param) }
         safeHook("[android] ${Prefs.SYSTEM_FLIP_LETTERBOX_BLACK}") { hookFlipLetterboxColor(param) }
         safeHook("[android] ${Prefs.SYSTEM_FLIP_IME_INSETS_FIX}") { hookFlipImeInsetsFix(param) }
         safeHook("[android] ${Prefs.SYSTEM_GBOARD_CUTOUT_FIX}") {
@@ -61,6 +65,7 @@ object SystemHook {
         systemCompatConfigEnabled = prefs.getBoolean(Prefs.SYSTEM_COMPAT_CONFIG, false)
         systemFlipContinuityEnabled = prefs.getBoolean(Prefs.SYSTEM_FLIP_CONTINUITY, false)
         flipLetterboxBlackEnabled = prefs.getBoolean(Prefs.SYSTEM_FLIP_LETTERBOX_BLACK, false)
+        hideStatusBarEnabled = prefs.getBoolean(Prefs.SYSTEM_FLIP_HIDE_STATUS_BAR, false)
         systemFlipImeInsetsFixEnabled = prefs.getBoolean(Prefs.SYSTEM_FLIP_IME_INSETS_FIX, false)
         systemGboardCutoutFixEnabled = prefs.getBoolean(Prefs.SYSTEM_GBOARD_CUTOUT_FIX, false)
         flipInputMethodPackageCache = normalizeFlipInputMethodPackage(
@@ -90,6 +95,10 @@ object SystemHook {
             }
             key == Prefs.SYSTEM_FLIP_LETTERBOX_BLACK -> {
                 flipLetterboxBlackEnabled = prefs.getBoolean(key, false)
+            }
+            key == Prefs.SYSTEM_FLIP_HIDE_STATUS_BAR -> {
+                hideStatusBarEnabled = prefs.getBoolean(key, false)
+                applyHideStatusBarNow()
             }
             key == Prefs.SYSTEM_FLIP_IME_INSETS_FIX -> {
                 systemFlipImeInsetsFixEnabled = prefs.getBoolean(key, false)
@@ -174,7 +183,9 @@ object SystemHook {
         val sizeCompatStub = param.classLoader.findClass("android.sizecompat.MiuiAppSizeCompatModeStub")
         val getSizeCompatStub = sizeCompatStub.method("get")
         isFlipFolded = {
-            runCatching { getSizeCompatStub.invoke(null)?.callMethod("isFlipFolded") as? Boolean ?: false }.getOrDefault(false)
+            foldedByDisplayGeometry()
+                ?: runCatching { getSizeCompatStub.invoke(null)?.callMethod("isFlipFolded") as? Boolean }.getOrNull()
+                ?: false
         }
 
         val activityRecord = param.classLoader.findClass("com.android.server.wm.ActivityRecord")
@@ -246,21 +257,54 @@ object SystemHook {
         val noDisplayCutout = displayCutout.getDeclaredField("NO_CUTOUT").also { it.isAccessible = true }.get(null)
         val displayCutoutType = windowInsetsType.method("displayCutout").invoke(null) as? Int ?: 0
 
-        // Remove display cutout from InsetsState. fillInsetsState feeds both sync paths
-        // (addWindowInner / relayoutWindow) and async paths (reportResized / notifyInsetsControlChanged).
+        // 从派发给应用的 InsetsState 里裁剪两类源，两者门控互相独立：
+        // displayCutout ← 外屏渲染模式 FULL_SCREEN（应用自己要求忽略摄像头区域）
+        // statusBars   ← 外屏隐藏状态栏开关（隐藏后应用需要把顶部空间铺满）
+        // 只改状态里的源，服务端原始状态不动，ControlTarget 动画与下拉 peek 不受影响
         val windowState = param.classLoader.findClass("com.android.server.wm.WindowState")
         val insetsStateClass = param.classLoader.findClass("android.view.InsetsState")
         hook(windowState.method("fillInsetsState", insetsStateClass, Boolean::class.javaPrimitiveType!!), after { chain, _ ->
-            if (!isFlipFolded()) return@after null
-            val packageName = chain.thisObject?.callMethod("getOwningPackage") as? String ?: return@after null
-            if (flipScreenModeFor(packageName) != FlipScreenMode.FULL_SCREEN) return@after null
+            val window = chain.thisObject ?: return@after null
+            val packageName = window.callMethod("getOwningPackage") as? String ?: return@after null
+            val stripCutout = isFlipFolded() && flipScreenModeFor(packageName) == FlipScreenMode.FULL_SCREEN
+            val stripStatusBar = shouldHideStatusBar(window)
+            if (!stripCutout && !stripStatusBar) return@after null
             val state = chain.args[0]
-            noDisplayCutout?.let { state.callMethod("setDisplayCutout", it) }
+            if (stripCutout) noDisplayCutout?.let { state.callMethod("setDisplayCutout", it) }
             for (i in (state.callMethod("sourceSize") as? Int ?: 0) - 1 downTo 0) {
                 val source = state.callMethod("sourceAt", i) ?: continue
-                if (source.callMethod("getType") as? Int == displayCutoutType) {
+                val type = source.callMethod("getType") as? Int ?: continue
+                if ((stripCutout && type == displayCutoutType) || (stripStatusBar && type == statusBarTypeBit)) {
                     state.callMethod("removeSourceAt", i)
                 }
+            }
+        })
+
+        // 派发给应用的客户端 InsetsState 来自 getCompatInsetsState()（与 fillInsetsState 的内部状态是两份），
+        // 只裁剪 fillInsetsState 不会影响应用实际拿到的状态，这里对返回值做同样裁剪（改副本，避免污染共享状态）
+        val insetsStateCopyCtor = insetsStateClass.getConstructor(insetsStateClass, Boolean::class.javaPrimitiveType!!)
+            .also { it.isAccessible = true }
+        hook(windowState.method("getCompatInsetsState"), after { chain, result ->
+            if (result == null) return@after result
+            val window = chain.thisObject ?: return@after result
+            val packageName = window.callMethod("getOwningPackage") as? String ?: return@after result
+            val stripCutout = isFlipFolded() && flipScreenModeFor(packageName) == FlipScreenMode.FULL_SCREEN
+            val stripStatusBar = shouldHideStatusBar(window)
+            if (!stripCutout && !stripStatusBar) return@after result
+            runCatching {
+                val copy = insetsStateCopyCtor.newInstance(result, true)
+                if (stripCutout) noDisplayCutout?.let { copy.callMethod("setDisplayCutout", it) }
+                for (i in (copy.callMethod("sourceSize") as? Int ?: 0) - 1 downTo 0) {
+                    val source = copy.callMethod("sourceAt", i) ?: continue
+                    val type = source.callMethod("getType") as? Int ?: continue
+                    if ((stripCutout && type == displayCutoutType) || (stripStatusBar && type == statusBarTypeBit)) {
+                        copy.callMethod("removeSourceAt", i)
+                    }
+                }
+                copy
+            }.getOrElse {
+                log("strip compat insets failed", it)
+                result
             }
         })
 
@@ -308,6 +352,236 @@ object SystemHook {
             item.getField("mConfiguration")?.let { fixConfigurationAppBounds(it) }
             chain.proceed()
         }
+    }
+
+    // 外屏隐藏状态栏（服务端 ControlTarget 接管方案，独立开关，不依赖外屏渲染模式）：
+    // 应用进程侧的 InsetsController 会按它自己的 requested（statusBars 可见）把 leash 拉回屏幕，
+    // 服务端无法约束客户端，因此把 statusBars 的 control target 换成 InsetsPolicy 自有的
+    // 服务端 ControlTarget（其 InsetsController 由本模块驱动），复用 MIUI 预置的
+    // hideSystemBars/showSystemBars 通道（hideSystemBars 自动屏蔽 transient 中的类型，不与下拉冲突）。
+    // 隐藏动画：ControlTarget 的 controller.hide → leash 移出屏幕（动画）；
+    // 布局收敛：getCompatInsetsState 把 statusBars 从派发给应用的状态里摘掉 → 应用 insets=0 并铺满顶部；
+    // 下拉 peek：InsetsPolicy.showTransient → 服务端 controller.show 让 leash 回到屏幕（动画），
+    //   触摸后 SystemUI AutoHideController → hideTransientBars → hideTransient →
+    //   updateBarControlTarget → hideSystemBars 自动收回。
+    private fun hookHideStatusBarOnFlip(param: SystemServerStartingParam) {
+        val windowState = param.classLoader.findClass("com.android.server.wm.WindowState")
+        val insetsPolicy = param.classLoader.findClass("com.android.server.wm.InsetsPolicy")
+
+        // WindowState 侧字段归一：mRequestedVisibleTypes 全部写入点只有 3 个（构造器初始
+        // defaultVisible、单参与双参 setRequestedVisibleTypes），归一保证 topAppHidesSystemBar、
+        // getInsetsStateWithVisibilityOverride（visible insets 计算）等服务端读取为隐藏语义；
+        // proceed 后回写字段，不依赖 libxposed 参数替换语义
+        val setRequestedVisibleTypes =
+            windowState.method("setRequestedVisibleTypes", Int::class.javaPrimitiveType!!)
+        val setRequestedVisibleTypesWithMask = windowState.method(
+            "setRequestedVisibleTypes",
+            Int::class.javaPrimitiveType!!,
+            Int::class.javaPrimitiveType!!,
+        )
+        module!!.deoptimize(setRequestedVisibleTypes)
+        module!!.deoptimize(setRequestedVisibleTypesWithMask)
+        val windowStateCtor = windowState.declaredConstructors.first { it.parameterCount > 5 }
+        hook(windowStateCtor, after { chain, _ -> normalizeStatusBarRequest(chain.thisObject) })
+        hook(setRequestedVisibleTypes, after { chain, result ->
+            normalizeStatusBarRequest(chain.thisObject)
+            result
+        })
+        hook(setRequestedVisibleTypesWithMask, after { chain, result ->
+            normalizeStatusBarRequest(chain.thisObject)
+            result
+        })
+
+        // statusBars 的 control target 改为服务端 ControlTarget，避免客户端 leash 自行回弹
+        val statusControlTargetInner =
+            insetsPolicy.method("getStatusControlTargetInner", windowState, Boolean::class.javaPrimitiveType!!)
+        module!!.deoptimize(statusControlTargetInner)
+        hook(statusControlTargetInner) { chain ->
+            if (!shouldHideStatusBar(chain.args[0])) return@hook chain.proceed()
+            chain.thisObject?.getField("mTransientControlTarget") ?: chain.proceed()
+        }
+
+        // 服务端接管期间的隐藏/peek 语义全部落在具体类的调用点上（ControlTarget 完全继承
+        // InsetsControlTarget 的接口默认方法，对默认方法的 hook 实测不被分发路径命中：
+        // mInitiallyVisible=true、source visible=true 均为实证），一律以
+        // 「provider 的 controlTarget 是服务端 ControlTarget 实例」作为门控，
+        // 该状态只会在 getStatusControlTargetInner 命中后出现，无需再回查焦点窗口。
+        val insetsSourceProvider = param.classLoader.findClass("com.android.server.wm.InsetsSourceProvider")
+        val insetsTargetClass = param.classLoader.findClass("com.android.server.wm.InsetsTarget")
+        val imeTrackerToken = param.classLoader.findClass($$"android.view.inputmethod.ImeTracker$Token")
+        val displayPolicy = param.classLoader.findClass("com.android.server.wm.DisplayPolicy")
+
+        // statusBars source 对客户端强制不可见（应用 insets 归零、可见 insets 计算一致）
+        val updateClientVisibility =
+            insetsSourceProvider.method("updateClientVisibility", insetsTargetClass, imeTrackerToken)
+        module!!.deoptimize(updateClientVisibility)
+        hook(updateClientVisibility) { chain ->
+            val provider = chain.thisObject ?: return@hook chain.proceed()
+            val source = runCatching { provider.getField("mSource") }.getOrNull()
+                ?: return@hook chain.proceed()
+            val type = runCatching { source.callMethod("getType") }.getOrNull() as? Int
+                ?: return@hook chain.proceed()
+            if (type and statusBarTypeBit == 0) return@hook chain.proceed()
+            val controlTarget = runCatching { provider.getField("mControlTarget") }.getOrNull()
+            if (!isServerStatusBarControlTarget(controlTarget)) return@hook chain.proceed()
+            val clientVisible = provider.getField("mClientVisible") as? Boolean
+                ?: return@hook chain.proceed()
+            if (clientVisible) {
+                provider.callMethod("setClientVisible", false)
+                true
+            } else {
+                false
+            }
+        }
+
+        // 下拉 peek：ControlTarget 继承的 canShowTransient 默认 false 会让原生流程走
+        // showInsets 空操作分支（完全静默），这里在 statusBars 控制权已归服务端时
+        // 直接复刻原生 transient 分支（SHOW_TYPES_FOR_SWIPE 等价位）
+        val requestTransientBars =
+            displayPolicy.method("requestTransientBars", windowState, Boolean::class.javaPrimitiveType!!)
+        module!!.deoptimize(requestTransientBars)
+        hook(requestTransientBars) { chain ->
+            val swipeTarget = chain.args[0] ?: return@hook chain.proceed()
+            val policy = chain.thisObject ?: return@hook chain.proceed()
+            val provider = runCatching { swipeTarget.callMethod("getControllableInsetProvider") }.getOrNull()
+                ?: return@hook chain.proceed()
+            val controlTarget = runCatching { provider.callMethod("getControlTarget") }.getOrNull()
+            if (!isServerStatusBarControlTarget(controlTarget)) return@hook chain.proceed()
+            val displayContent = policy.getField("mDisplayContent")
+            val insetsPolicyInstance = displayContent?.callMethod("getInsetsPolicy")
+            insetsPolicyInstance?.callMethod("showTransient", transientShowTypes, chain.args[1])
+        }
+
+        // control 移交/回收后驱动服务端 controller 收回 leash；
+        // hideSystemBars 会屏蔽 transient 中的类型，下拉展示期间天然不动作。
+        // 收回后必须补一次 insets 变更派发：transient/悬浮面板期间应用拿到的是可见态的
+        // 顶部 inset，服务端回到隐藏后若不给应用补派发，应用会一直保留状态栏高度的空白栏
+        hook(insetsPolicy.method("updateBarControlTarget", windowState), after { chain, _ ->
+            // 缓存 policy 与焦点窗口，供开关切换时立即生效
+            lastInsetsPolicy = chain.thisObject
+            lastTopWindow = chain.args[0]
+            hideStatusBarFocused = shouldHideStatusBar(chain.args[0])
+            if (!hideStatusBarFocused) return@after null
+            runCatching { chain.thisObject?.callMethod("hideSystemBars", statusBarTypeBit) }
+                .onFailure { log("hide status bar failed", it) }
+            null
+        })
+
+        // 下拉显示动画：statusBars 控制权恒定归服务端 ControlTarget，control 不会因 transient
+        // 切换而重新下发，原生 setRequestedVisibleTypes 对服务端 controller 是空操作；
+        // 按 MIUI 强制隐藏分支同款方式显式调用 controller.show 把 leash 动画拉回屏幕。
+        // 必须在原方法体把 requested 置为可见之前调用：controlAnimationUnchecked 会在
+        // 「requested 已等于目标状态」时跳过动画，实测 show 放在 after 时被跳过（无动画）。
+        // show 自身会把 requested 置为可见，原方法体随后保持该状态，保证 AutoHide 的
+        // hide 不会因「已隐藏」被跳过；自动收回链路不变
+        val showTransient = insetsPolicy.method(
+            "showTransient",
+            Int::class.javaPrimitiveType!!,
+            Boolean::class.javaPrimitiveType!!,
+        )
+        module!!.deoptimize(showTransient)
+        hook(showTransient) { chain ->
+            if (!hideStatusBarFocused) return@hook chain.proceed()
+            runCatching {
+                val target = chain.thisObject?.getField("mTransientControlTarget")
+                val controller = target?.getField("mInsetsController")
+                controller?.callMethod("show", statusBarTypeBit)
+            }.onFailure { log("full screen transient show failed", it) }
+            chain.proceed()
+        }
+
+        hookTransientStubInterceptor(param)
+
+        logInfo("[android] full screen immersive status bars hook installed")
+    }
+
+    // MIUI InputManagerServiceStubImpl 在折叠外屏拦截 WMS transient 请求（导致短滑无 peek），
+    // 仅在 FULL_SCREEN 应用持焦时放行；getInstance 为接口静态方法，用它延迟定位闭源实现类。
+    // 只 hook 一次：getInstance 每次手势都会调用，重复 hook 会堆叠拦截层并破坏手势管线
+    private fun hookTransientStubInterceptor(param: SystemServerStartingParam) {
+        val inputManagerServiceStub =
+            param.classLoader.findClass("com.android.server.input.InputManagerServiceStub")
+        hook(inputManagerServiceStub.method("getInstance"), after { _, result ->
+            val impl = result ?: return@after result
+            if (stubInterceptorHooked) return@after result
+            val intercept = runCatching {
+                impl.javaClass.method(
+                    "shouldInterceptRequestTransientBars",
+                    Float::class.javaPrimitiveType!!,
+                )
+            }.getOrNull() ?: return@after result
+            stubInterceptorHooked = true
+            hook(intercept) { inner ->
+                if (hideStatusBarFocused) false else inner.proceed()
+            }
+            logInfo("[android] transient stub interceptor released")
+            result
+        })
+    }
+
+    private fun normalizeStatusBarRequest(window: Any?) {
+        if (!shouldHideStatusBar(window)) return
+        val current = window?.getField("mRequestedVisibleTypes") as? Int ?: return
+        if (current and statusBarTypeBit != 0) {
+            window.setField("mRequestedVisibleTypes", current and statusBarTypeBit.inv())
+        }
+    }
+
+    // 顶部状态栏是否该隐藏：独立开关 + 折起 + 应用窗口（锁屏、桌面、输入法与系统窗口一律排除）
+    private fun shouldHideStatusBar(window: Any?): Boolean {
+        if (!hideStatusBarEnabled) return false
+        if (!isFlipFolded()) return false
+        val packageName = window?.callMethod("getOwningPackage") as? String ?: return false
+        if (packageName in hideStatusBarExcludedPackages) return false
+        val type = runCatching { window?.getField("mAttrs")?.getField("type") as? Int }.getOrNull()
+            ?: return false
+        // BASE_APPLICATION / APPLICATION / APPLICATION_STARTING / DRAWN_APPLICATION
+        return type in APP_WINDOW_TYPE_RANGE
+    }
+
+    // 开关切换即时生效：直接驱动当前焦点应用对应的 InsetsPolicy
+    private fun applyHideStatusBarNow() {
+        val policy = lastInsetsPolicy ?: return
+        val hide = shouldHideStatusBar(lastTopWindow)
+        hideStatusBarFocused = hide
+        runCatching { policy.callMethod(if (hide) "hideSystemBars" else "showSystemBars", statusBarTypeBit) }
+            .onFailure { log("toggle hide status bar failed", it) }
+    }
+
+
+    // FULL_SCREEN 应用的 statusBars 控制权在服务端：常态是 InsetsPolicy$ControlTarget，
+    // getStatusControlTargetInner 改成 mTransientControlTarget 后则落在 InsetsPolicy$TransientControlTarget，
+    // 两者都算服务端目标，否则按 exact class 判定的 gate 在稳态下永不命中
+    private fun isServerStatusBarControlTarget(controlTarget: Any?): Boolean {
+        val className = controlTarget?.javaClass?.simpleName ?: return false
+        if (className == "ControlTarget") return true
+        return hideStatusBarFocused && className == "TransientControlTarget"
+    }
+
+    // 折叠判定的权威来源：折起时默认显示是外屏 1208x1392（高宽比 1.15），展开是内屏 1224x2912（2.38），
+    // 按短边 1.6 倍阈值区分。MiuiAppSizeCompatModeStub#isFlipFolded 在开机未解锁时会一直返回 false，
+    // 会让全部沉浸 hook 短路，这里以显示尺寸为主、stub 为兜底；一秒内复用缓存避免热路径反复调用
+    private fun foldedByDisplayGeometry(): Boolean? {
+        val now = SystemClock.uptimeMillis()
+        // 一秒内复用结果；取不到显示信息时也计入缓存时间，避免热路径反复反射
+        if (now - foldedGeometryCachedAt < 1000L) return if (foldedGeometryKnown) foldedGeometryCache else null
+        foldedGeometryCachedAt = now
+        val folded = runCatching {
+            val globalClass = Class.forName("android.hardware.display.DisplayManagerGlobal")
+            val global = globalClass.getDeclaredMethod("getInstance").also { it.isAccessible = true }.invoke(null)
+                ?: return@runCatching null
+            val info = globalClass
+                .getDeclaredMethod("getDisplayInfo", Int::class.javaPrimitiveType!!)
+                .also { it.isAccessible = true }
+                .invoke(global, Display.DEFAULT_DISPLAY) ?: return@runCatching null
+            val width = info.javaClass.getField("logicalWidth").getInt(info)
+            val height = info.javaClass.getField("logicalHeight").getInt(info)
+            if (width <= 0 || height <= 0) return@runCatching null
+            minOf(width, height) * 1.6f > maxOf(width, height)
+        }.getOrNull()
+        foldedGeometryKnown = folded != null
+        if (folded != null) foldedGeometryCache = folded
+        return folded
     }
 
     private fun hookFlipLetterboxColor(param: SystemServerStartingParam) {
@@ -522,6 +796,48 @@ object SystemHook {
     private const val DEFAULT_INPUT_METHOD = "default_input_method"
     private const val LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS = 3
     private const val FLIP_UNSCALE = 1.0f
+
+    // WindowInsets.Type.statusBars() 的位掩码，用于归一 mRequestedVisibleTypes
+    private val statusBarTypeBit = WindowInsets.Type.statusBars()
+
+    // DisplayPolicy.SHOW_TYPES_FOR_SWIPE 的等价位（statusBars|navigationBars），
+    // 下拉 peek 复刻原生 transient 分支时传给 InsetsPolicy.showTransient
+    private val transientShowTypes = WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars()
+
+    // 外屏隐藏状态栏开关（改动后需重载系统框架生效）
+    @Volatile
+    private var hideStatusBarEnabled = false
+
+    // 最近一次 updateBarControlTarget 的焦点窗口是否处于「隐藏状态栏」语义，
+    // 供 InputManagerServiceStub 的 transient 拦截放行与 peek 判断使用
+    @Volatile
+    private var hideStatusBarFocused = false
+
+    // 最近一次 updateBarControlTarget 的 policy 与焦点窗口，开关切换时用它即时生效
+    @Volatile
+    private var lastInsetsPolicy: Any? = null
+    @Volatile
+    private var lastTopWindow: Any? = null
+
+    // 隐藏状态栏不生效的包：锁屏/通知栏、外屏桌面、主屏桌面
+    private val hideStatusBarExcludedPackages =
+        setOf("com.android.systemui", "com.miui.fliphome", "com.miui.home")
+
+    // WindowManager.LayoutParams.TYPE_BASE_APPLICATION..TYPE_DRAWN_APPLICATION，即应用窗口家族
+    private val APP_WINDOW_TYPE_RANGE = 1..4
+
+    // transient 拦截器是否已完成一次性 hook，防止 getInstance 重复调用导致 hook 堆叠
+    @Volatile
+    private var stubInterceptorHooked = false
+
+    // 折叠判定缓存（见 foldedByDisplayGeometry），一秒内复用，避免热路径反复查显示信息
+    @Volatile
+    private var foldedGeometryCache = false
+    @Volatile
+    private var foldedGeometryKnown = false
+    @Volatile
+    private var foldedGeometryCachedAt = 0L
+
     @Volatile
     private var systemCompatConfigEnabled = false
     @Volatile

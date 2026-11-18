@@ -30,6 +30,8 @@
     <string name="pref_system_flip_continuity">合盖继续使用</string>
     <string name="pref_system_flip_continuity_summary">覆盖系统设置，所有应用合盖继续使用</string>
     <string name="pref_system_flip_ime_pkg">外屏输入法</string>
+    <string name="pref_system_flip_hide_status_bar">外屏隐藏状态栏</string>
+    <string name="pref_system_flip_hide_status_bar_summary">折起时所有应用隐藏顶部状态栏并铺满该区域；锁屏、桌面与输入法不受影响。与其他外屏模式设置相互独立，开关后需重新加载系统框架</string>
     <string name="pref_system_flip_letterbox_black">外屏摄像头区域黑色背景</string>
     <string name="pref_system_flip_letterbox_black_summary">将未适配应用外屏留白区域改为黑色</string>
     <string name="pref_system_flip_ime_insets_fix">修复外屏键盘弹出时画面上移</string>

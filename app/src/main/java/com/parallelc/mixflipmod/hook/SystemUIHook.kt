@@ -38,16 +38,20 @@ object SystemUIHook : BaseHook() {
     )
 
     override fun setupHooks(prefKey: String, param: PackageReadyParam) {
-        val configs = param.classLoader.findClass("com.miui.utils.configs.MiuiConfigs")
         when (prefKey) {
-            Prefs.SYSUI_NOTIFICATION -> hookNotification(param, configs)
-            Prefs.SYSUI_CONTROL_CENTER -> hookControlCenter(param, configs)
-            Prefs.SYSUI_STATUS_BAR_ICON -> hookStatusBarIcon(param, configs)
-            Prefs.SYSUI_STATUS_BAR_CLOCK -> hookStatusBarClock(param, configs)
+            Prefs.SYSUI_NOTIFICATION -> hookNotification(param)
+            Prefs.SYSUI_CONTROL_CENTER -> hookControlCenter(param)
+            Prefs.SYSUI_STATUS_BAR_ICON -> hookStatusBarIcon(param)
+            Prefs.SYSUI_STATUS_BAR_CLOCK -> hookStatusBarClock(param)
         }
     }
 
-    private fun hookNotification(param: PackageReadyParam, miuiConfigs: Class<*>) {
+    // tiny-screen 相关分支才依赖 MiuiConfigs，按分支按需取，避免拖累控制中心那组 hook
+    private fun miuiConfigs(param: PackageReadyParam): Class<*> =
+        param.classLoader.findClass("com.miui.utils.configs.MiuiConfigs")
+
+    private fun hookNotification(param: PackageReadyParam) {
+        val miuiConfigs = miuiConfigs(param)
         val clazz = param.classLoader.findClass("com.android.systemui.statusbar.notification.row.MiuiNotificationMenuRow")
         val legacyTinyScreenScopes = listOf("isTinyScreen", "isFlipTinyScreen")
             .mapNotNull { name ->
@@ -123,7 +127,7 @@ object SystemUIHook : BaseHook() {
         return scopes[index].run { proceedWithScopes(chain, scopes, index + 1) }
     }
 
-    private fun hookControlCenter(param: PackageReadyParam, miuiConfigs: Class<*>) {
+    private fun hookControlCenter(param: PackageReadyParam) {
         val factoryClass = param.classLoader.findClass($$"com.android.systemui.shared.plugins.PluginInstance$PluginFactory")
         hook(factoryClass.method("createPluginContext"), object : Hooker {
             private var isHooked = false
@@ -229,7 +233,8 @@ object SystemUIHook : BaseHook() {
         })
     }
 
-    private fun hookStatusBarIcon(param: PackageReadyParam, miuiConfigs: Class<*>) {
+    private fun hookStatusBarIcon(param: PackageReadyParam) {
+        val miuiConfigs = miuiConfigs(param)
         val containerClass = param.classLoader.findClass("com.android.systemui.statusbar.phone.NotificationIconContainer")
         val isFlipTinyScreen = miuiConfigs.method("isFlipTinyScreen", Context::class.java)
         val originInvoker = module!!.getInvoker(isFlipTinyScreen).setType(Type.ORIGIN)
@@ -271,7 +276,8 @@ object SystemUIHook : BaseHook() {
         return prefInt(Prefs.SYSUI_STATUS_BAR_ICON_MAX, 3).coerceIn(1, 15)
     }
 
-    private fun hookStatusBarClock(param: PackageReadyParam, miuiConfigs: Class<*>) {
+    private fun hookStatusBarClock(param: PackageReadyParam) {
+        val miuiConfigs = miuiConfigs(param)
         val isFlipTinyScreen = miuiConfigs.method("isFlipTinyScreen", Context::class.java)
         val originInvoker = module!!.getInvoker(isFlipTinyScreen).setType(Type.ORIGIN)
 
