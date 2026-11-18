@@ -162,6 +162,11 @@ private val flipHomeConfig = AppConfig(
     packageName = "com.miui.fliphome",
     prefs = listOf(
         PrefSpec.Switch(Prefs.FLIPHOME_NO_START_PAGE, R.string.pref_fliphome_no_start_page, R.string.pref_fliphome_no_start_page_summary),
+        PrefSpec.Switch(
+            Prefs.FLIPHOME_DOUBLE_TAP_LOCK,
+            R.string.pref_fliphome_double_tap_lock,
+            R.string.pref_fliphome_double_tap_lock_summary,
+        ),
         PrefSpec.OptionSelect(
             Prefs.FLIPHOME_RECENTS_STYLE,
             R.string.pref_fliphome_recents_style,

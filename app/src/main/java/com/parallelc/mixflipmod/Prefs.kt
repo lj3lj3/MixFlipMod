@@ -22,6 +22,7 @@ object Prefs {
 
     // com.miui.fliphome
     const val FLIPHOME_NO_START_PAGE   = "fliphome_no_start_page"
+    const val FLIPHOME_DOUBLE_TAP_LOCK = "fliphome_double_tap_lock"
     const val FLIPHOME_RECENTS_STYLE   = "fliphome_recents_style"
     const val FLIPHOME_RECENTS_LONG_PRESS_MENU = "fliphome_recents_long_press_menu"
     const val FLIPHOME_APP_LONG_PRESS_MENU = "fliphome_app_long_press_menu"

@@ -15,8 +15,10 @@ import android.os.Bundle
 import android.os.UserHandle
 import android.provider.Settings
 import android.util.TypedValue
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -58,6 +60,12 @@ object FlipHomeHook : BaseHook() {
     private const val PA_PACKAGE = "com.miui.personalassistant"
     private const val PA_PICKER_ACTIVITY = "com.miui.personalassistant.picker.business.home.pages.PickerHomeActivity"
     private const val METHOD_IMPORT = "mixflipmod_import"
+    private const val LOCK_SCREEN_ACTION = "com.miui.app.ExtraStatusBarManager.action_TRIGGER_TOGGLE"
+    private const val LOCK_SCREEN_TOGGLE_EXTRA = "com.miui.app.ExtraStatusBarManager.extra_TOGGLE_ID"
+    private const val LOCK_SCREEN_TOGGLE_ID = 10
+
+    // 已挂过双击手势的视图，避免重复 setOnTouchListener
+    private val doubleTapAttached = WeakHashMap<View, Boolean>()
     private const val METHOD_PING = "mixflipmod_ping"
     private const val EXTRA_TARGET = "mixflipmod_target"
     private const val TARGET_FLIPHOME = "fliphome"
@@ -105,6 +113,7 @@ object FlipHomeHook : BaseHook() {
     override fun setupHooks(prefKey: String, param: PackageReadyParam) {
         when (prefKey) {
             Prefs.FLIPHOME_NO_START_PAGE -> hookNoStartPage(param)
+            Prefs.FLIPHOME_DOUBLE_TAP_LOCK -> hookDoubleTapLock(param)
             Prefs.FLIPHOME_RECENTS_STYLE -> hookRecentsStyle(param)
             Prefs.FLIPHOME_RECENTS_LONG_PRESS_MENU -> hookRecentsLongPressMenu(param)
             Prefs.FLIPHOME_APP_LONG_PRESS_MENU -> hookAppLongPressMenu(param)
@@ -118,6 +127,49 @@ object FlipHomeHook : BaseHook() {
             cls.method("onStartIntercept", UserHandle::class.java, Intent::class.java, Bundle::class.java, View::class.java),
             replaceResult(false)
         )
+    }
+
+    // 外屏双击锁屏：复用内屏桌面的同一条通道——向 SystemUI 发 TRIGGER_TOGGLE，id=10 即锁屏。
+    // 接收方（ToggleManagerController）会校验发送包是系统应用，fliphome 位于 /product/priv-app 满足条件
+    private fun hookDoubleTapLock(param: PackageReadyParam) {
+        val launcherClass = param.classLoader.findClass("com.miui.fliphome.FlipLauncher")
+        // onCreate 结束时列表可能还没 inflate 完（实测 findViewById 为 null），
+        // 三个时机都尝试挂载，视图级去重保证只挂一次
+        listOf(
+            launcherClass.method("onCreate", Bundle::class.java),
+            launcherClass.method("onResume"),
+            launcherClass.method("onWindowFocusChanged", Boolean::class.javaPrimitiveType!!),
+        ).forEach { target ->
+            hook(target, after { chain, result ->
+                attachDoubleTapLock(chain.thisObject as? Activity)
+                result
+            })
+        }
+    }
+
+    private fun attachDoubleTapLock(activity: Activity?) {
+        val context = activity ?: return
+        val gridId = context.resources.getIdentifier("recycle_view", "id", context.packageName)
+        val touchTarget = runCatching { context.findViewById<View>(gridId) }.getOrNull()
+        if (gridId == 0 || touchTarget == null) return
+        if (doubleTapAttached.putIfAbsent(touchTarget, true) != null) return
+
+        val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(event: MotionEvent): Boolean {
+                // 点在图标上时事件已被列表项消费，这里再判一次命中作兜底
+                val hit = runCatching { touchTarget.callMethod("findChildViewUnder", event.x, event.y) }.getOrNull()
+                if (hit != null) return false
+                touchTarget.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                context.sendBroadcast(
+                    Intent(LOCK_SCREEN_ACTION).putExtra(LOCK_SCREEN_TOGGLE_EXTRA, LOCK_SCREEN_TOGGLE_ID)
+                )
+                return true
+            }
+        })
+        touchTarget.setOnTouchListener { _, event ->
+            detector.onTouchEvent(event)
+            false
+        }
     }
 
     private fun hookRecentsStyle(param: PackageReadyParam) {
