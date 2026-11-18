@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MixFlipMod</string>
-    <string name="xposed_description">小米 MIX Flip / MIX Flip 2 外屏增强模块</string>
+    <string name="xposed_description">小米 MIX Flip / MIX Flip 2 通用增强模块</string>
     <string name="xposed_status_active">已激活</string>
     <string name="xposed_status_inactive">未激活</string>
     <string name="version_format">v%1$s (%2$d)</string>

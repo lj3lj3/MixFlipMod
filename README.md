@@ -1,103 +1,73 @@
 # MixFlipMod
 
-小米 MIX Flip / MIX Flip 2 外屏增强模块
+小米 MIX Flip / MIX Flip 2 通用增强模块
 
-支持 HyperOS 3.0 及以上版本，需要配合支持 libxposed API 101 的 Xposed 框架使用
+不只针对外屏：在改善外屏体验之外，也覆盖系统框架、桌面、输入法与全局搜索等场景。
+
+支持 HyperOS 3.0 及以上，需要配合支持 libxposed API 101 的 Xposed 框架使用。
 
 应用包名为 `com.parallelc.mixflipmod`。与原包名版本属于不同应用，安装后需要在 LSPosed 中重新启用并设置作用域，原版本的设置不会自动迁移；请避免同时启用两个版本。
 
-## 构建与性能验证
-
-使用 JDK 17 和 Android SDK 37 构建。在 Windows 上执行：
-
-```powershell
-.\gradlew.bat :app:assembleDebug
-.\gradlew.bat :app:assembleUnminified
-.\gradlew.bat :app:assembleRelease
-```
-
-`debug` 为可调试版本，未启用 R8；`unminified` 为不可调试且未启用 R8 的性能验证版本，使用调试签名；`release` 保持启用 R8。产物分别位于 `app/build/outputs/apk/` 下的同名目录。比较 R8 对流畅度的影响时，应使用 `unminified` 与 `release`，避免混入 Compose 调试开销。
-
-主界面的应用信息在后台加载并复用，列表入口独立懒加载，图标使用有容量上限的内存缓存。仅保留实际使用的三个 Material 扩展图标源码，避免未启用 R8 时打包完整扩展图标库。
-
-## 自动构建与发布
-
-`.github/workflows/release.yml` 沿用 MusicEnhance 的发布规则：推送到 `main`、推送 `v*` 标签或手动运行 Actions 时，根据 `app/build.gradle.kts` 的版本构建并上传 GitHub Release。标签须匹配应用版本，例如 `3.1.0` 对应 `v3.1.0`。
-
-- 数字版本发布为正式 Release；带 `-beta` 后缀的版本发布为 Pre-release。
-- 从上一个同类型 Release 汇总提交，生成更新日志。
-- 上传原始命名的 Release APK 和 `.apk.sha256` 文件，Actions 产物保留 14 天。
-- 已公开的版本不覆盖；发布新版本需同时递增 `versionName` 和 `versionCode`。上传失败保留草稿，允许重试。
-
-Actions Secrets 继续使用 `KEY_STORE`（JKS 文件的 Base64）、`KEY_STORE_PASSWORD` 和 `ALIAS`；可选的 `KEY_PASSWORD` 未设置时使用密钥库密码。自动发布必须配置签名，不会回退到调试签名；发布使用当前仓库的 `GITHUB_TOKEN`。
-
-检查发布规则：`python -B -m unittest discover -s .github/scripts/tests -v`。构建前可执行 `./gradlew --no-configuration-cache :app:writeReleaseMetadata :app:lintRelease :app:assembleRelease`（Windows 使用 `gradlew.bat`）。
-
 ## 功能
 
-隐藏外屏状态：
+**系统框架**
 
-- 恢复部分系统应用默认样式
-
-系统框架：
-
-- 解除外屏应用限制
-- 所有应用合盖继续使用
-- 自定义外屏输入法（设置为 Gboard 后，可使用 Magisk 或 KernelSU + mountify 刷入 MixFlipGboard 模块启用外屏优化适配）
-- 自定义外屏应用渲染模式（全屏/不缩放/自定义缩放比例）
+- 解除外屏应用限制、所有应用合盖继续使用
+- 自定义外屏输入法
+- 自定义外屏应用渲染模式（全屏 / 不缩放 / 自定义缩放比例）
+- 外屏隐藏状态栏（独立开关，隐藏后应用铺满顶部）
 - 未适配应用外屏摄像头区域黑色背景
-- 修复外屏键盘弹出时画面上移（默认关闭，适用于默认/缩放兼容模式；更新模块后重启手机，开启后重新打开目标应用）
-
-> 系统应用推荐缩放比例：
->
-> | 应用 | 缩放比例 |
-> | --- | --- |
-> | 电话 | 70% |
-> | 短信 | 80% |
-> | 相册 | 80% |
-> | 时钟 | 70% |
-> | 日历 | 70% |
-> | 计算器 | 70% |
-
-系统界面：
-
-- 恢复外屏通知长按菜单
-- 恢复外屏控制中心样式
+- 修复外屏键盘弹出时画面上移（默认关闭，仅默认/缩放兼容模式；开关后重新打开目标应用）
 - 隐藏外屏状态栏时钟
+
+**外屏桌面**
+
+- 空白处双击锁屏
+- 屏蔽特殊应用外屏启动页
+- 最近任务样式（纵向/横向）与长按功能
+- 应用桌面长按菜单增加「应用信息」
+
+**系统界面**
+
+- 恢复外屏通知长按菜单、控制中心样式
 - 调整外屏通知图标最大数量
 
-外屏桌面：
+**全局搜索**
 
-- 屏蔽特殊应用外屏启动页
-- 最近任务样式（纵向/横向）
-- 最近任务长按功能（纵向显示功能按钮，横向打开应用信息）
-- 应用桌面长按菜单（增加应用信息选项）
+- 搜索键直接打开第一个已安装应用结果，未命中时保持原生
+- 网页搜索交由系统默认浏览器打开
+- 可选搜索引擎：百度 / 必应 / Google / 搜狗
 
-智能助理：
+**输入法与智能助理**
 
-- 支持添加外屏小部件
+- 搜狗输入法小米版：恢复外屏工具栏、剪贴板候选词
+- Gboard：外屏摄像头避让（无需替换 Gboard）
+- 智能助理：支持添加外屏小部件
 
-搜狗输入法小米版：
+> 系统应用推荐缩放比例：电话 70%、短信 80%、相册 80%、时钟 70%、日历 70%、计算器 70%
 
-- 恢复外屏工具栏
-- 恢复外屏剪贴板候选词
+## 构建
 
-Gboard：
+JDK 17 + Android SDK 37：
 
-- 外屏摄像头避让（默认关闭，摄像头左上时全宽显示，右下时侧边避让；无需替换 Gboard，展开内屏后恢复原布局）
+```bash
+./gradlew :app:assembleDebug        # 可调试，未启用 R8
+./gradlew :app:assembleUnminified   # 未启用 R8，用于性能对比（调试签名）
+./gradlew :app:assembleRelease      # 启用 R8
+```
+
+产物位于 `app/build/outputs/apk/` 下的同名目录。
+
+推送到 `main`、推送 `v*` 标签或手动运行 Actions 时，会按 `app/build.gradle.kts` 的版本构建并发布 Release（`-beta` 为 Pre-release，标签需与版本一致，如 `3.1.0` → `v3.1.0`）。
 
 ## 权限说明
 
-项目会读取已安装应用列表，用于显示相关应用的名称、图标，并为需要按应用选择的功能提供应用列表
+读取已安装应用列表，用于显示应用名称、图标，并为按应用生效的功能提供选择列表。
 
 ## 致谢
 
-项目实现参考了以下开源项目的一些思路：
-
-- [KernelSU](https://github.com/tiann/KernelSU)
-- [HyperCeiler](https://github.com/ReChronoRain/HyperCeiler)
-- [AndroidX Compose Material Icons](https://android.googlesource.com/platform/frameworks/support/+/androidx-main/compose/material/material-icons-extended/)：三个本地图标保留原始 Apache-2.0 许可证声明。
+实现思路参考 [KernelSU](https://github.com/tiann/KernelSU)、[HyperCeiler](https://github.com/ReChronoRain/HyperCeiler)、[AndroidX Compose Material Icons](https://android.googlesource.com/platform/frameworks/support/+/androidx-main/compose/material/material-icons-extended/)（本地图标保留 Apache-2.0 声明）。
 
 ## 许可
 
-本项目使用 AGPL-3.0 许可证，详见 [LICENSE](LICENSE)
+AGPL-3.0，详见 [LICENSE](LICENSE)
