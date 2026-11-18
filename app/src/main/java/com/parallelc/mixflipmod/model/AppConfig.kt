@@ -190,6 +190,22 @@ private val personalAssistantConfig = AppConfig(
     ),
 )
 
+private val quickSearchBoxConfig = AppConfig(
+    packageName = "com.android.quicksearchbox",
+    prefs = listOf(
+        PrefSpec.Switch(
+            Prefs.QSB_SEARCH_KEY_OPEN_FIRST,
+            R.string.pref_qsb_search_key_open_first,
+            R.string.pref_qsb_search_key_open_first_summary,
+        ),
+        PrefSpec.Switch(
+            Prefs.QSB_SEARCH_DEFAULT_BROWSER,
+            R.string.pref_qsb_search_default_browser,
+            R.string.pref_qsb_search_default_browser_summary,
+        ),
+    ),
+)
+
 private val sogouConfig = AppConfig(
     packageName = "com.sohu.inputmethod.sogou.xiaomi",
     prefs = listOf(
@@ -216,6 +232,7 @@ internal val configNodes = listOf(
     ConfigNode.Package(systemUiConfig),
     ConfigNode.Package(flipHomeConfig),
     ConfigNode.Package(personalAssistantConfig),
+    ConfigNode.Package(quickSearchBoxConfig),
     ConfigNode.Package(sogouConfig),
     ConfigNode.Package(gboardConfig),
 )

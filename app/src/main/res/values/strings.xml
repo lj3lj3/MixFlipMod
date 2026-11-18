@@ -30,6 +30,10 @@
     <string name="pref_system_flip_continuity">合盖继续使用</string>
     <string name="pref_system_flip_continuity_summary">覆盖系统设置，所有应用合盖继续使用</string>
     <string name="pref_system_flip_ime_pkg">外屏输入法</string>
+    <string name="pref_qsb_search_key_open_first">搜索键打开第一个结果</string>
+    <string name="pref_qsb_search_key_open_first_summary">全局搜索中输入后按键盘搜索键，直接打开高亮的第一个结果；没有结果时保持原有行为。开关后需重启全局搜索</string>
+    <string name="pref_qsb_search_default_browser">搜索使用默认浏览器</string>
+    <string name="pref_qsb_search_default_browser_summary">网页搜索改由系统默认浏览器打开，搜索引擎不变。开关后需重启全局搜索</string>
     <string name="pref_fliphome_double_tap_lock">外屏双击锁屏</string>
     <string name="pref_fliphome_double_tap_lock_summary">在外屏桌面空白处双击即可锁屏，与内屏桌面行为一致</string>
     <string name="pref_system_flip_hide_status_bar">外屏隐藏状态栏</string>
