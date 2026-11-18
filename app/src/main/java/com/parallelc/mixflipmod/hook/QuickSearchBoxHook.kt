@@ -36,15 +36,28 @@ object QuickSearchBoxHook : BaseHook() {
     private const val ID_SUGGESTION_PAGE = "rv_page_recycler_view"
     private const val ID_SUGGESTION_CARD = "rv_card_recycler_view"
 
-    // 兜底网页搜索地址，与全局搜索当前使用的引擎一致（百度）
-    private const val FALLBACK_SEARCH_URL = "https://m.baidu.com/s?word="
+    // 交给默认浏览器时使用的搜索引擎地址模板
+    private val SEARCH_URL_TEMPLATES = mapOf(
+        Prefs.SearchEngine.BAIDU to "https://m.baidu.com/s?word=",
+        Prefs.SearchEngine.BING to "https://www.bing.com/search?q=",
+        Prefs.SearchEngine.GOOGLE to "https://www.google.com/search?q=",
+        Prefs.SearchEngine.SOGOU to "https://m.sogou.com/web/searchList.jsp?keyword=",
+    )
 
     private var installed = false
     private var openFirstResult = false
     private var searchWithDefaultBrowser = false
+    private var replaceSearchEngine = false
+    private var searchUrlTemplate = SEARCH_URL_TEMPLATES.getValue(Prefs.SearchEngine.BAIDU)
 
     override fun setupHooks(prefKey: String, param: PackageReadyParam) {
-        if (prefKey != Prefs.QSB_SEARCH_KEY_OPEN_FIRST && prefKey != Prefs.QSB_SEARCH_DEFAULT_BROWSER) return
+        val handled = setOf(
+            Prefs.QSB_SEARCH_KEY_OPEN_FIRST,
+            Prefs.QSB_SEARCH_DEFAULT_BROWSER,
+            Prefs.QSB_SEARCH_ENGINE_ENABLED,
+            Prefs.QSB_SEARCH_ENGINE,
+        )
+        if (prefKey !in handled) return
         installSearchHooks(param)
     }
 
@@ -55,7 +68,18 @@ object QuickSearchBoxHook : BaseHook() {
         val prefs = module?.getRemotePreferences(Prefs.NAME)
         openFirstResult = prefs?.getBoolean(Prefs.QSB_SEARCH_KEY_OPEN_FIRST, false) ?: false
         searchWithDefaultBrowser = prefs?.getBoolean(Prefs.QSB_SEARCH_DEFAULT_BROWSER, false) ?: false
-        logInfo("[qsb] search hooks installed: openFirst=$openFirstResult defaultBrowser=$searchWithDefaultBrowser")
+        replaceSearchEngine = prefs?.getBoolean(Prefs.QSB_SEARCH_ENGINE_ENABLED, false) ?: false
+        val engine = prefs?.getString(Prefs.QSB_SEARCH_ENGINE, Prefs.SearchEngine.BAIDU)
+            ?: Prefs.SearchEngine.BAIDU
+        // 开关关闭时不替换引擎，沿用原生（百度）
+        val effectiveEngine = if (replaceSearchEngine) engine else Prefs.SearchEngine.BAIDU
+        searchUrlTemplate = SEARCH_URL_TEMPLATES[effectiveEngine]
+            ?: SEARCH_URL_TEMPLATES.getValue(Prefs.SearchEngine.BAIDU)
+        logInfo(
+            "[qsb] search hooks installed: openFirst=$openFirstResult " +
+                "defaultBrowser=$searchWithDefaultBrowser replaceEngine=$replaceSearchEngine " +
+                "engine=$effectiveEngine"
+        )
 
         val textViewClass = param.classLoader.findClass("android.widget.TextView")
         hook(textViewClass.method("onEditorAction", Int::class.javaPrimitiveType!!)) { chain ->
@@ -78,7 +102,7 @@ object QuickSearchBoxHook : BaseHook() {
         if (!searchWithDefaultBrowser) return false
         if (query.isEmpty()) return false
         return runCatching {
-            val url = FALLBACK_SEARCH_URL + URLEncoder.encode(query, "UTF-8")
+            val url = searchUrlTemplate + URLEncoder.encode(query, "UTF-8")
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
             val activity = findActivity(input.context)
             if (activity != null) {

@@ -25,6 +25,15 @@ object Prefs {
     const val FLIPHOME_DOUBLE_TAP_LOCK = "fliphome_double_tap_lock"
     const val QSB_SEARCH_KEY_OPEN_FIRST = "qsb_search_key_open_first"
     const val QSB_SEARCH_DEFAULT_BROWSER = "qsb_search_default_browser"
+    const val QSB_SEARCH_ENGINE_ENABLED = "qsb_search_engine_enabled"
+    const val QSB_SEARCH_ENGINE = "qsb_search_engine"
+
+    object SearchEngine {
+        const val BAIDU = "baidu"
+        const val BING = "bing"
+        const val GOOGLE = "google"
+        const val SOGOU = "sogou"
+    }
     const val FLIPHOME_RECENTS_STYLE   = "fliphome_recents_style"
     const val FLIPHOME_RECENTS_LONG_PRESS_MENU = "fliphome_recents_long_press_menu"
     const val FLIPHOME_APP_LONG_PRESS_MENU = "fliphome_app_long_press_menu"

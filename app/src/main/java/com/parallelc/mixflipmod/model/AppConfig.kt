@@ -203,6 +203,23 @@ private val quickSearchBoxConfig = AppConfig(
             R.string.pref_qsb_search_default_browser,
             R.string.pref_qsb_search_default_browser_summary,
         ),
+        PrefSpec.Switch(
+            Prefs.QSB_SEARCH_ENGINE_ENABLED,
+            R.string.pref_qsb_search_engine_enabled,
+            R.string.pref_qsb_search_engine_enabled_summary,
+        ),
+        PrefSpec.OptionSelect(
+            Prefs.QSB_SEARCH_ENGINE,
+            R.string.pref_qsb_search_engine,
+            R.string.pref_qsb_search_engine_summary,
+            defaultValue = OptionValue.Str(Prefs.SearchEngine.BAIDU),
+            options = listOf(
+                PrefSpec.OptionSelect.Option(OptionValue.Str(Prefs.SearchEngine.BAIDU), R.string.qsb_engine_baidu),
+                PrefSpec.OptionSelect.Option(OptionValue.Str(Prefs.SearchEngine.BING), R.string.qsb_engine_bing),
+                PrefSpec.OptionSelect.Option(OptionValue.Str(Prefs.SearchEngine.GOOGLE), R.string.qsb_engine_google),
+                PrefSpec.OptionSelect.Option(OptionValue.Str(Prefs.SearchEngine.SOGOU), R.string.qsb_engine_sogou),
+            ),
+        ),
     ),
 )
 

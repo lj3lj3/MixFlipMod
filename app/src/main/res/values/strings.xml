@@ -33,7 +33,15 @@
     <string name="pref_qsb_search_key_open_first">搜索键打开第一个结果</string>
     <string name="pref_qsb_search_key_open_first_summary">全局搜索中输入后按键盘搜索键，直接打开高亮的第一个结果；没有结果时保持原有行为。开关后需重启全局搜索</string>
     <string name="pref_qsb_search_default_browser">搜索使用默认浏览器</string>
-    <string name="pref_qsb_search_default_browser_summary">网页搜索改由系统默认浏览器打开，搜索引擎不变。开关后需重启全局搜索</string>
+    <string name="pref_qsb_search_default_browser_summary">网页搜索改由系统默认浏览器打开，搜索引擎由下一项决定。开关后需重启全局搜索</string>
+    <string name="pref_qsb_search_engine_enabled">替换搜索引擎</string>
+    <string name="pref_qsb_search_engine_enabled_summary">关闭时沿用原生引擎（百度）打开网页搜索；开启后使用下面选择的搜索引擎。开关后需重启全局搜索</string>
+    <string name="pref_qsb_search_engine">搜索引擎</string>
+    <string name="pref_qsb_search_engine_summary">「替换搜索引擎」开启时生效。修改后需重启全局搜索</string>
+    <string name="qsb_engine_baidu">百度</string>
+    <string name="qsb_engine_bing">必应</string>
+    <string name="qsb_engine_google">Google</string>
+    <string name="qsb_engine_sogou">搜狗</string>
     <string name="pref_fliphome_double_tap_lock">外屏双击锁屏</string>
     <string name="pref_fliphome_double_tap_lock_summary">在外屏桌面空白处双击即可锁屏，与内屏桌面行为一致</string>
     <string name="pref_system_flip_hide_status_bar">外屏隐藏状态栏</string>
