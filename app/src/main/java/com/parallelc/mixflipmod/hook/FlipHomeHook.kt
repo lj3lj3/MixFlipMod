@@ -12,6 +12,8 @@ import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.UserHandle
 import android.provider.Settings
 import android.util.TypedValue
@@ -20,9 +22,11 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.widget.FrameLayout
+import android.widget.RemoteViews
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.PopupWindow
@@ -36,6 +40,7 @@ import com.parallelc.mixflipmod.hook.util.findClass
 import com.parallelc.mixflipmod.hook.util.getField
 import com.parallelc.mixflipmod.hook.util.hook
 import com.parallelc.mixflipmod.hook.util.log
+import com.parallelc.mixflipmod.hook.util.logInfo
 import com.parallelc.mixflipmod.hook.util.method
 import com.parallelc.mixflipmod.hook.util.prefInt
 import com.parallelc.mixflipmod.hook.util.replaceResult
@@ -132,6 +137,7 @@ object FlipHomeHook : BaseHook() {
     // 外屏双击锁屏：复用内屏桌面的同一条通道——向 SystemUI 发 TRIGGER_TOGGLE，id=10 即锁屏。
     // 接收方（ToggleManagerController）会校验发送包是系统应用，fliphome 位于 /product/priv-app 满足条件
     private fun hookDoubleTapLock(param: PackageReadyParam) {
+        logInfo("[fliphome] double tap lock hooks installed")
         val launcherClass = param.classLoader.findClass("com.miui.fliphome.FlipLauncher")
         // onCreate 结束时列表可能还没 inflate 完（实测 findViewById 为 null），
         // 三个时机都尝试挂载，视图级去重保证只挂一次
@@ -145,30 +151,406 @@ object FlipHomeHook : BaseHook() {
                 result
             })
         }
+        // 触摸路由追踪：记录参与派发的 fliphome 视图（定位时钟卡触摸被谁截走）
+        runCatching {
+            val viewGroupClass = param.classLoader.findClass("android.view.ViewGroup")
+            hook(viewGroupClass.method("dispatchTouchEvent", MotionEvent::class.java)) { chain ->
+                val event = chain.args[0] as? MotionEvent
+                val receiver = chain.thisObject
+                if (event != null && event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    // 时钟 widget 容器是异步 inflate 的：DOWN 到达时当场补挂整棵子树
+                    if (receiver.javaClass.simpleName == "WatchOverlayGroupView") {
+                        val root = receiver as? View ?: return@hook chain.proceed()
+                        doubleTapHelper?.let {
+                            it.clockWidgetRoot = root
+                            it.attachDeep(root)
+                        }
+                    }
+                }
+                chain.proceed()
+            }
+        }.onFailure { log("hook dispatch trace failed", it) }
+
+        // 时钟卡等 widget 的内容是异步挂载/刷新的，宿主每次 updateAppWidget 后
+        // 立即补挂监听，保证新 inflate 出来的内部视图也在覆盖范围内
+        runCatching {
+            val hostClass = param.classLoader.findClass("android.appwidget.AppWidgetHostView")
+            hook(hostClass.method("updateAppWidget", RemoteViews::class.java), after { chain, result ->
+                val host = chain.thisObject as? View
+                val grid = doubleTapOwner
+                val helper = doubleTapHelper
+                val inGrid = host != null && grid != null && isDescendantOf(host, grid)
+                if (host != null && grid != null && helper != null && inGrid) {
+                    helper.attachDeep(host)
+                }
+                result
+            })
+        }.onFailure { log("hook app widget host failed", it) }
     }
+
+    private fun isDescendantOf(view: View, ancestor: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current === ancestor) return true
+            current = current.parent as? View
+        }
+        return false
+    }
+
+    // 网格项内是否包含小部件宿主视图（时钟卡等 widget 单元格），向下遍历
+    private fun containsWidgetHost(view: View?): Boolean {
+        if (view == null) return false
+        if (view is android.appwidget.AppWidgetHostView) return true
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                if (containsWidgetHost(view.getChildAt(i))) return true
+            }
+        }
+        return false
+    }
+
+    // 时钟卡 = 标题为「时钟」的应用图标单元格（FlipHome 时钟图标带实时时间渲染）
+    private fun isClockCard(view: View?): Boolean {
+        var current = view
+        while (current != null) {
+            if (current.javaClass.name == "com.miui.fliphome.view.LauncherAppItem") {
+                return containsTitle(current, "时钟")
+            }
+            current = current.parent as? View
+        }
+        return false
+    }
+
+    private fun containsTitle(view: View, title: String): Boolean {
+        if (view is TextView && view.text.toString().trim() == title) return true
+        if (view is ViewGroup) {
+            for (i in 0 until view.childCount) {
+                if (containsTitle(view.getChildAt(i) ?: continue, title)) return true
+            }
+        }
+        return false
+    }
+
+    // 时钟卡实际是 MAML 宿主（FlipMaMlHostView）渲染的独立 widget 容器，不在网格里
+    private fun isInsideClockWidget(view: View?): Boolean {
+        var current = view
+        while (current != null) {
+            if (current.javaClass.simpleName == "FlipMaMlHostView") return true
+            current = current.parent as? View
+        }
+        return false
+    }
+
+    private fun findViewByClassName(root: View, simpleName: String): View? {
+        if (root.javaClass.simpleName == simpleName) return root
+        if (root is ViewGroup) {
+            for (i in 0 until root.childCount) {
+                findViewByClassName(root.getChildAt(i) ?: continue, simpleName)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    // 触摸目标是否位于小部件内部（宿主是祖先，向上遍历）
+    private fun isInsideWidget(view: View?): Boolean {
+        var current = view
+        while (current != null) {
+            if (current is android.appwidget.AppWidgetHostView) return true
+            current = current.parent as? View
+        }
+        return false
+    }
+
+    private var doubleTapHelper: DoubleTapHelper? = null
+    private var doubleTapOwner: View? = null
+    private var gridLayoutHooked = false
 
     private fun attachDoubleTapLock(activity: Activity?) {
         val context = activity ?: return
         val gridId = context.resources.getIdentifier("recycle_view", "id", context.packageName)
         val touchTarget = runCatching { context.findViewById<View>(gridId) }.getOrNull()
-        if (gridId == 0 || touchTarget == null) return
-        if (doubleTapAttached.putIfAbsent(touchTarget, true) != null) return
+        if (gridId == 0 || touchTarget == null) {
+            log("double tap attach skipped: gridId=$gridId target=$touchTarget")
+            return
+        }
+        if (doubleTapOwner === touchTarget && doubleTapHelper != null) {
+            // 每次 attach 都重走子树：widget 内容是异步挂载的，新视图补挂监听
+            doubleTapHelper!!.attachDeep(touchTarget)
+            return
+        }
+        logInfo("[fliphome] double tap attached: ${touchTarget.javaClass.simpleName}")
 
-        val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        // 一个网格一个助手：深度挂到网格整棵子树，widget 内消费触摸并延迟转发单击，
+        // 双击到来时取消单击并锁屏；图标与空白处保持原有行为
+        val helper = DoubleTapHelper(context, touchTarget)
+        doubleTapOwner = touchTarget
+        doubleTapHelper = helper
+        helper.attachDeep(touchTarget)
+        // 时钟卡在独立的 widget 容器里（WatchOverlayGroupView/WidgetPagerView），
+        // 和网格一起挂载，双击同样锁屏
+        runCatching { context.window?.decorView }.getOrNull()?.let { decor ->
+            val widgetRoot = findViewByClassName(decor, "WatchOverlayGroupView")
+            if (widgetRoot != null) {
+                helper.attachDeep(widgetRoot)
+                logInfo("[fliphome] clock widget attached: ${widgetRoot.javaClass.simpleName}")
+            }
+        }
+        // 网格子视图（含时钟卡单元格）是异步填充的，首次挂载时还不存在；
+        // 每次网格布局后重走子树，新视图自动补挂（视图级去重保证开销恒定）
+        if (!gridLayoutHooked) {
+            gridLayoutHooked = true
+            runCatching {
+                val gridClass = touchTarget.javaClass
+                hook(
+                    gridClass.method(
+                        "onLayout",
+                        Boolean::class.javaPrimitiveType!!,
+                        Int::class.javaPrimitiveType!!,
+                        Int::class.javaPrimitiveType!!,
+                        Int::class.javaPrimitiveType!!,
+                        Int::class.javaPrimitiveType!!,
+                    ),
+                    after { chain, result ->
+                        val grid = chain.thisObject as? View ?: return@after Unit
+                        val helper = doubleTapHelper
+                        if (grid === doubleTapOwner && helper != null) {
+                            helper.attachDeep(grid)
+                        }
+                        result
+                    },
+                )
+            }.onFailure { log("hook grid onLayout failed", it) }
+        }
+    }
+
+    private class DoubleTapHelper(private val context: Context, private val grid: View) : View.OnTouchListener {
+        private val handler = Handler(Looper.getMainLooper())
+        private val slop = ViewConfiguration.get(context).scaledTouchSlop
+        private var activeView: View? = null
+        private var consumeMode = false
+        private var doubleTapped = false
+        private var pendingClick: Runnable? = null
+        // 滑动重放：超过 touch slop 判定为滑动，把整段手势重放给时钟容器，翻页/滚动恢复原生行为
+        var clockWidgetRoot: View? = null
+        private var swiped = false
+        private var replaying = false
+        private var bufferedDown: MotionEvent? = null
+        private var bufferedUp: MotionEvent? = null
+        private var downRawX = 0f
+        private var downRawY = 0f
+
+        private val detector = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(event: MotionEvent): Boolean {
-                // 点在图标上时事件已被列表项消费，这里再判一次命中作兜底
-                val hit = runCatching { touchTarget.callMethod("findChildViewUnder", event.x, event.y) }.getOrNull()
-                if (hit != null) return false
-                touchTarget.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                // 双击确定：取消待转发的单击
+                pendingClick?.let { handler.removeCallbacks(it) }
+                pendingClick = null
+                bufferedDown?.recycle()
+                bufferedDown = null
+                bufferedUp?.recycle()
+                bufferedUp = null
+                doubleTapped = true
+
+                // widget / 时钟卡内的双击：直接锁屏
+                if (consumeMode) {
+                    grid.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    context.sendBroadcast(
+                        Intent(LOCK_SCREEN_ACTION).putExtra(LOCK_SCREEN_TOGGLE_EXTRA, LOCK_SCREEN_TOGGLE_ID)
+                    )
+                    return true
+                }
+
+                // 坐标换算到网格空间再做命中检测
+                val gridLocation = IntArray(2)
+                grid.getLocationOnScreen(gridLocation)
+                val gridX = event.rawX - gridLocation[0]
+                val gridY = event.rawY - gridLocation[1]
+
+                val hit = runCatching { grid.callMethod("findChildViewUnder", gridX, gridY) }.getOrNull()
+                if (hit != null) {
+                    val isWidget = containsWidgetHost(hit as? View)
+                    val clickable = runCatching {
+                        hit.callMethod("isClickable") as? Boolean == true ||
+                            hit.callMethod("hasOnClickListeners") as? Boolean == true
+                    }.getOrDefault(false)
+                    // 应用图标不锁屏；时钟卡、widget 卡片与空白允许
+                    val clockCard = isClockCard(hit as? View)
+                    if (clickable && !isWidget && !clockCard) return false
+                }
+                grid.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 context.sendBroadcast(
                     Intent(LOCK_SCREEN_ACTION).putExtra(LOCK_SCREEN_TOGGLE_EXTRA, LOCK_SCREEN_TOGGLE_ID)
                 )
                 return true
             }
         })
-        touchTarget.setOnTouchListener { _, event ->
-            detector.onTouchEvent(event)
-            false
+
+        fun attachDeep(view: View) {
+            if (doubleTapAttached.putIfAbsent(view, true) == null) {
+                view.setOnTouchListener(this)
+                if (view is ViewGroup) {
+                    for (i in 0 until view.childCount) {
+                        attachDeep(view.getChildAt(i) ?: continue)
+                    }
+                }
+            } else if (view is ViewGroup) {
+                // 根视图已挂过时仍要遍历孩子：子视图可能是异步填充后新加的
+                for (i in 0 until view.childCount) {
+                    attachDeep(view.getChildAt(i) ?: continue)
+                }
+            }
+        }
+
+        override fun onTouch(view: View, event: MotionEvent): Boolean {
+            // 重放中的事件放行，避免自己递归消费
+            if (replaying) return false
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                doubleTapped = false
+                consumeMode = isInsideWidget(view) || isClockCard(view) || isInsideClockWidget(view)
+                activeView = view
+                if (consumeMode) {
+                    swiped = false
+                    bufferedDown?.recycle()
+                    bufferedDown = MotionEvent.obtain(event)
+                    downRawX = event.rawX
+                    downRawY = event.rawY
+                    detector.onTouchEvent(event)
+                    return true
+                }
+            }
+            if (!consumeMode) {
+                detector.onTouchEvent(event)
+                return false
+            }
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE -> {
+                    if (!swiped &&
+                        (abs(event.rawX - downRawX) > slop || abs(event.rawY - downRawY) > slop)
+                    ) {
+                        swiped = true
+                        replayDown()
+                    }
+                    if (swiped) forward(event) else detector.onTouchEvent(event)
+                    return true
+                }
+
+                MotionEvent.ACTION_UP -> {
+                    if (swiped) {
+                        forward(event)
+                        swiped = false
+                        return true
+                    }
+                    detector.onTouchEvent(event)
+                    if (!doubleTapped) {
+                        if (isInsideClockWidget(view)) {
+                            // MAML 时钟卡没有标准 OnClickListener：延迟重放 DOWN+UP 给容器，
+                            // 双击到来时取消（重放即触发原生单击行为）
+                            bufferedUp = MotionEvent.obtain(event)
+                            val down = bufferedDown
+                            val up = bufferedUp
+                            val runnable = Runnable {
+                                if (down != null && up != null) {
+                                    replayPair(down, up)
+                                    down.recycle()
+                                    up.recycle()
+                                }
+                                bufferedDown = null
+                                bufferedUp = null
+                            }
+                            pendingClick = runnable
+                            handler.postDelayed(runnable, 320L)
+                        } else {
+                            // 单击：延迟转发给可点击的祖先（双击时会取消）
+                            val clickable = findClickableAncestor(view)
+                            if (clickable != null) {
+                                val runnable = Runnable { clickable.performClick() }
+                                pendingClick = runnable
+                                handler.postDelayed(runnable, 320L)
+                            }
+                        }
+                    }
+                    doubleTapped = false
+                    return true
+                }
+
+                MotionEvent.ACTION_CANCEL -> {
+                    swiped = false
+                    bufferedDown?.recycle()
+                    bufferedDown = null
+                    bufferedUp?.recycle()
+                    bufferedUp = null
+                    return true
+                }
+            }
+            return true
+        }
+
+        // 把事件换算到目标容器坐标后重放（绕过我们的监听，走原生派发）
+        private fun replayPair(down: MotionEvent, up: MotionEvent) {
+            val target = clockWidgetRoot ?: activeView ?: return
+            replaying = true
+            try {
+                val downCopy = MotionEvent.obtain(down)
+                rebase(downCopy, activeView, target)
+                target.dispatchTouchEvent(downCopy)
+                downCopy.recycle()
+                val upCopy = MotionEvent.obtain(up)
+                rebase(upCopy, activeView, target)
+                target.dispatchTouchEvent(upCopy)
+                upCopy.recycle()
+            } finally {
+                replaying = false
+            }
+        }
+
+        private fun replayDown() {
+            val target = clockWidgetRoot ?: activeView ?: return
+            bufferedDown?.let { down ->
+                val copy = MotionEvent.obtain(down)
+                rebase(copy, activeView, target)
+                replaying = true
+                try {
+                    target.dispatchTouchEvent(copy)
+                } finally {
+                    replaying = false
+                }
+                copy.recycle()
+            }
+            bufferedDown?.recycle()
+            bufferedDown = null
+        }
+
+        private fun forward(event: MotionEvent) {
+            val target = clockWidgetRoot ?: activeView ?: return
+            val copy = MotionEvent.obtain(event)
+            rebase(copy, activeView, target)
+            replaying = true
+            try {
+                target.dispatchTouchEvent(copy)
+            } finally {
+                replaying = false
+            }
+            copy.recycle()
+        }
+
+        private fun rebase(event: MotionEvent, from: View?, to: View?) {
+            if (from == null || to == null) return
+            val fromLocation = IntArray(2)
+            val toLocation = IntArray(2)
+            from.getLocationOnScreen(fromLocation)
+            to.getLocationOnScreen(toLocation)
+            event.offsetLocation(
+                (fromLocation[0] - toLocation[0]).toFloat(),
+                (fromLocation[1] - toLocation[1]).toFloat(),
+            )
+        }
+
+        private fun findClickableAncestor(view: View): View? {
+            var current: View? = view
+            while (current != null) {
+                if (current.isClickable) return current
+                current = current.parent as? View
+            }
+            return null
         }
     }
 
