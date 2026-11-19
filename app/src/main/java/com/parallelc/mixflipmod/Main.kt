@@ -6,6 +6,7 @@ import com.parallelc.mixflipmod.hook.GboardHook
 import com.parallelc.mixflipmod.hook.HideOuterHook
 import com.parallelc.mixflipmod.hook.PersonalAssistantHook
 import com.parallelc.mixflipmod.hook.QuickSearchBoxHook
+import com.parallelc.mixflipmod.hook.TinyKeyguardShortcutHook
 import com.parallelc.mixflipmod.hook.SogouHook
 import com.parallelc.mixflipmod.hook.SystemHook
 import com.parallelc.mixflipmod.hook.SystemUIHook
@@ -36,6 +37,7 @@ class Main : XposedModule() {
         SogouHook,
         PersonalAssistantHook,
         QuickSearchBoxHook,
+        TinyKeyguardShortcutHook,
     )
 
     override fun onModuleLoaded(param: ModuleLoadedParam) {

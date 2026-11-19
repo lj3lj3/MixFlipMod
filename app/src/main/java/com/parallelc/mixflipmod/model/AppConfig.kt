@@ -144,6 +144,11 @@ private val systemUiConfig = AppConfig(
         PrefSpec.Switch(Prefs.SYSUI_CONTROL_CENTER, R.string.pref_sysui_control_center, R.string.pref_sysui_control_center_summary),
         PrefSpec.Switch(Prefs.SYSUI_STATUS_BAR_CLOCK, R.string.pref_sysui_status_bar_clock),
         PrefSpec.Switch(
+            Prefs.SYSTEMUI_TINY_LOCK_SHORTCUTS,
+            R.string.pref_systemui_tiny_lock_shortcuts,
+            R.string.pref_systemui_tiny_lock_shortcuts_summary,
+        ),
+        PrefSpec.Switch(
             Prefs.SYSUI_STATUS_BAR_ICON,
             R.string.pref_sysui_status_bar_icon_max,
             children = listOf(

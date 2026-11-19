@@ -6,6 +6,7 @@ object Prefs {
     // android (system framework)
     const val SYSTEM_COMPAT_CONFIG     = "system_compat_config"
     const val SYSTEM_FLIP_CONTINUITY   = "system_flip_continuity"
+    const val SYSTEMUI_TINY_LOCK_SHORTCUTS = "systemui_tiny_lock_shortcuts"
     const val SYSTEM_FLIP_SCREEN_MODE  = "system_flip_screen_mode"
     const val SYSTEM_FLIP_HIDE_STATUS_BAR = "system_flip_hide_status_bar"
     const val SYSTEM_FLIP_IME_PKG      = "system_flip_ime_pkg"
